@@ -1,20 +1,30 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { CodeAnalysis } from "../types";
+import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
+import { CodeAnalysis, ChatMessage } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// Initialisation stricte selon les règles de l'API Gemini
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
-export const analyzePythonCode = async (code: string): Promise<CodeAnalysis> => {
-  const response = await ai.models.generateContent({
+/**
+ * Analyse le code Python de l'utilisateur par rapport aux exigences du projet.
+ * Utilise gemini-3-pro-preview pour des tâches de raisonnement complexes.
+ */
+export const analyzePythonCode = async (code: string, requirements: string): Promise<CodeAnalysis> => {
+  const prompt = `Tu es un expert Python. Analyse ce code pour un projet de To-Do List.
+  
+  Code à analyser:
+  \`\`\`python
+  ${code}
+  \`\`\`
+  
+  Objectifs du projet:
+  ${requirements}
+
+  Vérifie les erreurs de syntaxe, suggère des améliorations et identifie quels IDs d'objectifs sont remplis.`;
+
+  const response: GenerateContentResponse = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
-    contents: `Analyze this Python code for a To-Do List project. 
-    The project requires: Adding, Listing, Completing, and Deleting tasks using a list of dictionaries.
-    
-    Code to analyze:
-    \`\`\`python
-    ${code}
-    \`\`\`
-    `,
+    contents: prompt,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -23,45 +33,58 @@ export const analyzePythonCode = async (code: string): Promise<CodeAnalysis> => 
           errors: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: "List of syntax errors or logic bugs found.",
+            description: "Erreurs de syntaxe ou bugs logiques."
           },
           suggestions: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: "Improvements or missing requirements.",
+            description: "Conseils pour améliorer le code."
           },
           conceptsUsed: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: "Python concepts identified (e.g., loops, dicts, functions).",
+            description: "Concepts Python identifiés (ex: dict, list, while)."
           },
+          completedRequirementIds: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "Liste des IDs d'objectifs validés par ce code."
+          }
         },
-        required: ["errors", "suggestions", "conceptsUsed"],
-      },
-    },
-  });
-
-  try {
-    return JSON.parse(response.text || '{}') as CodeAnalysis;
-  } catch (e) {
-    return { errors: ["Failed to parse analysis"], suggestions: [], conceptsUsed: [] };
-  }
-};
-
-export const getTutorHint = async (message: string, code: string, history: {role: string, parts: any[]}[]) => {
-  const chat = ai.chats.create({
-    model: 'gemini-3-flash-preview',
-    config: {
-      systemInstruction: `You are an expert Python Tutor helping a student build a To-Do List console app. 
-      The student must use: Lists, Dictionaries, Tuples, Strings, Loops, Conditions, and Functions.
-      Language of communication: French (Français).
-      Be encouraging and pedagogical. Don't just give the whole solution; explain the logic.
-      The current code context is provided in the prompt.`,
+        required: ["errors", "suggestions", "conceptsUsed", "completedRequirementIds"]
+      }
     }
   });
 
-  const response = await chat.sendMessage({
-    message: `Current code:\n${code}\n\nStudent message: ${message}`
+  try {
+    // Accès à .text en tant que propriété (non-méthode)
+    const text = response.text || '{}';
+    return JSON.parse(text) as CodeAnalysis;
+  } catch (e) {
+    console.error("Parsing failed", e);
+    return { errors: ["Erreur d'analyse"], suggestions: [], conceptsUsed: [], completedRequirementIds: [] };
+  }
+};
+
+/**
+ * Récupère un conseil du tuteur IA. 
+ * ChatMessage est importé pour typer correctement l'historique de chat.
+ */
+export const getTutorHint = async (message: string, code: string, history: ChatMessage[]) => {
+  const chat = ai.chats.create({
+    model: 'gemini-3-flash-preview',
+    config: {
+      systemInstruction: `Tu es un tuteur Python bienveillant. 
+      Le projet est une To-Do List console. 
+      Utilise le code actuel pour guider l'élève sans lui donner la réponse complète.
+      Explique les concepts (listes, dictionnaires, boucles).
+      Réponds en Français.`,
+    }
+  });
+
+  // Utilisation de sendMessage avec le paramètre message obligatoire
+  const response: GenerateContentResponse = await chat.sendMessage({
+    message: `Code actuel:\n${code}\n\nQuestion de l'élève: ${message}`
   });
 
   return response.text;
