@@ -1,0 +1,5 @@
+{
+  "name": "Python To-Do List Mentor",
+  "description": "An interactive learning companion for building a Python-based To-Do List application. Features real-time code analysis, requirement tracking, and a Gemini-powered AI tutor to help you master Python lists, dictionaries, and loops.",
+  "requestFramePermissions": []
+}
